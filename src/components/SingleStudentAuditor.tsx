@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { StudentAuditReport, AcademicLevel, SensitivityLevel } from "../types";
 import { AuditReportCard } from "./AuditReportCard";
+import { performClientSideSingleAudit } from "../utils/clientAuditEngine";
 import {
   SAMPLE_STUDENT_AUTHENTIC,
   SAMPLE_AI_CHATGPT,
@@ -56,29 +57,50 @@ export const SingleStudentAuditor: React.FC = () => {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Không thể thẩm định mã nguồn.");
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Response is not JSON (e.g. Vercel 404 HTML page "The page could not be found")
+        console.warn("Backend API returned non-JSON response, using client-side heuristic audit engine.");
       }
 
-      const auditData: StudentAuditReport = {
-        studentName: data.studentName || studentName,
-        code,
-        aiRiskLevel: data.auditResult.aiRiskLevel,
-        aiRiskScore: data.auditResult.aiRiskScore,
-        summary: data.auditResult.summary,
-        evidence: data.auditResult.evidence || [],
-        commentStyle: data.auditResult.commentStyle,
-        structureStyle: data.auditResult.structureStyle,
-        interviewQuestions: data.auditResult.interviewQuestions || [],
-        staticFindings: data.staticFindings || [],
-        timestamp: new Date().toISOString(),
-      };
-
-      setReport(auditData);
+      if (res.ok && data && data.auditResult) {
+        const auditData: StudentAuditReport = {
+          studentName: data.studentName || studentName,
+          code,
+          aiRiskLevel: data.auditResult.aiRiskLevel,
+          aiRiskScore: data.auditResult.aiRiskScore,
+          summary: data.auditResult.summary,
+          evidence: data.auditResult.evidence || [],
+          commentStyle: data.auditResult.commentStyle,
+          structureStyle: data.auditResult.structureStyle,
+          interviewQuestions: data.auditResult.interviewQuestions || [],
+          staticFindings: data.staticFindings || [],
+          timestamp: new Date().toISOString(),
+        };
+        setReport(auditData);
+      } else {
+        // Graceful fallback to client-side rule engine (works offline and on static hosts like Vercel)
+        const fallbackReport = performClientSideSingleAudit(
+          studentName.trim() || "Học sinh",
+          code,
+          academicLevel,
+          sensitivity
+        );
+        setReport(fallbackReport);
+      }
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Đã xảy ra lỗi khi kết nối tới máy chủ thẩm định.");
+      console.warn("Network error reaching /api/audit/single, falling back to client-side audit engine:", err);
+      // Seamlessly fall back to client-side audit engine instead of showing fatal error
+      const fallbackReport = performClientSideSingleAudit(
+        studentName.trim() || "Học sinh",
+        code,
+        academicLevel,
+        sensitivity
+      );
+      setReport(fallbackReport);
     } finally {
       setIsLoading(false);
     }

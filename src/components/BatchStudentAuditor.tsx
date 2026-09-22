@@ -34,6 +34,7 @@ import { AuditReportCard } from "./AuditReportCard";
 import { CrossComparisonMatrix } from "./CrossComparisonMatrix";
 import { formatBatchReportToMarkdown } from "../utils/reportFormatter";
 import { runClassMossAudit } from "../utils/mossEngine";
+import { performClientSideSingleAudit } from "../utils/clientAuditEngine";
 
 export const BatchStudentAuditor: React.FC = () => {
   const [submissions, setSubmissions] = useState<SubmissionItem[]>([]);
@@ -173,32 +174,47 @@ export const BatchStudentAuditor: React.FC = () => {
         }),
       });
 
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Không thể thực hiện thẩm định AI hàng loạt.");
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.warn("Backend API returned non-JSON, switching to client-side rule evaluation.");
       }
 
-      const builtReports: StudentAuditReport[] = (data.studentAudits || []).map((audit: any) => {
-        const sub = submissions.find((s) => s.studentName === audit.studentName);
-        return {
-          studentName: audit.studentName,
-          fileName: sub?.fileName || "code.cpp",
-          code: sub?.code || "",
-          aiRiskLevel: audit.aiRiskLevel || "Thấp",
-          aiRiskScore: audit.aiRiskScore || 0,
-          summary: audit.summary || "",
-          evidence: audit.evidence || [],
-          commentStyle: audit.commentStyle || "Bình thường",
-          interviewQuestions: audit.interviewQuestions || [],
-          timestamp: new Date().toISOString(),
-        };
-      });
+      if (res.ok && data && Array.isArray(data.studentAudits)) {
+        const builtReports: StudentAuditReport[] = data.studentAudits.map((audit: any) => {
+          const sub = submissions.find((s) => s.studentName === audit.studentName);
+          return {
+            studentName: audit.studentName,
+            fileName: sub?.fileName || "code.cpp",
+            code: sub?.code || "",
+            aiRiskLevel: audit.aiRiskLevel || "Thấp",
+            aiRiskScore: audit.aiRiskScore || 0,
+            summary: audit.summary || "",
+            evidence: audit.evidence || [],
+            commentStyle: audit.commentStyle || "Bình thường",
+            interviewQuestions: audit.interviewQuestions || [],
+            timestamp: new Date().toISOString(),
+          };
+        });
+        setReports(builtReports);
+      } else {
+        // Fallback to client-side heuristic audit for all submissions
+        const fallbackReports: StudentAuditReport[] = submissions.map((sub) => {
+          return performClientSideSingleAudit(sub.studentName, sub.code, academicLevel, sensitivity);
+        });
+        setReports(fallbackReports);
+      }
 
-      setReports(builtReports);
       setActiveResultTab("ai");
     } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Lỗi trong quá trình thẩm định AI danh sách học sinh.");
+      console.warn("Network error during batch audit, falling back to client-side evaluation:", err);
+      const fallbackReports: StudentAuditReport[] = submissions.map((sub) => {
+        return performClientSideSingleAudit(sub.studentName, sub.code, academicLevel, sensitivity);
+      });
+      setReports(fallbackReports);
+      setActiveResultTab("ai");
     } finally {
       setIsLoading(false);
     }
