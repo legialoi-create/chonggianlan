@@ -16,6 +16,7 @@ import {
 import { StudentAuditReport } from "../types";
 import { formatSingleReportToMarkdown } from "../utils/reportFormatter";
 import { getExerciseName } from "../utils/pathHelper";
+import { ensureVietnamese } from "../utils/textHelper";
 
 interface AuditReportCardProps {
   report: StudentAuditReport;
@@ -213,7 +214,7 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
         {report.summary && (
           <div className="text-sm text-slate-300 bg-slate-800/40 p-3.5 rounded-lg border border-slate-800/80 leading-relaxed">
             <span className="font-semibold text-slate-200">Nhận xét tổng thể: </span>
-            {report.summary}
+            {ensureVietnamese(report.summary)}
           </div>
         )}
 
@@ -235,7 +236,7 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-semibold px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60">
-                      {item.category}
+                      {ensureVietnamese(item.category)}
                     </span>
                     <span className="text-[11px] text-slate-500 font-mono">
                       Bằng chứng #{idx + 1}
@@ -253,7 +254,7 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
 
                   <div className="text-xs text-slate-300 leading-relaxed pt-1">
                     <span className="font-semibold text-rose-300">Lý do nghi vấn: </span>
-                    {item.reason}
+                    {ensureVietnamese(item.reason)}
                   </div>
                 </div>
               ))}
@@ -273,7 +274,7 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
               Phong cách chú thích
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              {report.commentStyle || "Không phát hiện dấu hiệu comment máy móc."}
+              {ensureVietnamese(report.commentStyle, "Không có chú thích nào trong mã nguồn.")}
             </p>
           </div>
 
@@ -283,8 +284,7 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
               Cấu trúc & Quy ước đặt tên
             </div>
             <p className="text-xs text-slate-300 leading-relaxed">
-              {report.structureStyle ||
-                "Bố cục code và tên biến theo phong cách người học thông thường."}
+              {ensureVietnamese(report.structureStyle, "Bố cục code và tên biến theo phong cách người học thông thường.")}
             </p>
           </div>
         </div>
@@ -320,10 +320,10 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
                       </span>
                       <div>
                         <div className="text-xs font-semibold text-slate-100">
-                          "{q.question}"
+                          "{ensureVietnamese(q.question)}"
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
-                          Mục đích: {q.purpose}
+                          Mục đích: {ensureVietnamese(q.purpose)}
                         </div>
                       </div>
                     </div>
@@ -342,7 +342,7 @@ export const AuditReportCard: React.FC<AuditReportCardProps> = ({
                         Kỳ vọng học sinh tự viết phải giải thích được:
                       </div>
                       <p className="leading-relaxed bg-slate-950/60 p-2.5 rounded border border-slate-800/80 font-mono text-[11px] text-slate-300">
-                        {q.expectedAnswer}
+                        {ensureVietnamese(q.expectedAnswer)}
                       </p>
                     </div>
                   )}

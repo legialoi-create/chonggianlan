@@ -1,36 +1,37 @@
 import { StudentAuditReport, CrossComparison } from "../types";
+import { ensureVietnamese } from "./textHelper";
 
 export function formatSingleReportToMarkdown(report: StudentAuditReport): string {
   let md = `#### [${report.studentName}${report.fileName ? ` / ${report.fileName}` : ""}]\n`;
   md += `* **Đánh giá mức độ nghi vấn AI:** ${report.aiRiskLevel} (${report.aiRiskScore}% ước tính)\n`;
 
   if (report.summary) {
-    md += `* **Tóm tắt kiểm định:** ${report.summary}\n`;
+    md += `* **Tóm tắt kiểm định:** ${ensureVietnamese(report.summary)}\n`;
   }
 
   md += `* **Bằng chứng cụ thể:**\n`;
   if (report.evidence && report.evidence.length > 0) {
     report.evidence.forEach((item) => {
       md += `  - Dòng code / đoạn thuật toán đáng ngờ: \`${item.codeSnippet.replace(/\n/g, " ")}\`\n`;
-      md += `    + Phân loại: ${item.category}\n`;
-      md += `    + Lý do nghi vấn: ${item.reason}\n`;
+      md += `    + Phân loại: ${ensureVietnamese(item.category)}\n`;
+      md += `    + Lý do nghi vấn: ${ensureVietnamese(item.reason)}\n`;
     });
   } else {
     md += `  - Không phát hiện đoạn code đáng ngờ mang dấu hiệu đặc trưng của AI.\n`;
   }
 
-  md += `* **Phong cách chú thích:** ${report.commentStyle || "Không có chú thích hoặc chú thích tự nhiên của người học."}\n`;
+  md += `* **Phong cách chú thích:** ${ensureVietnamese(report.commentStyle, "Không có chú thích hoặc chú thích tự nhiên của người học.")}\n`;
 
   if (report.structureStyle) {
-    md += `* **Cấu trúc & Bố cục:** ${report.structureStyle}\n`;
+    md += `* **Cấu trúc & Bố cục:** ${ensureVietnamese(report.structureStyle)}\n`;
   }
 
   md += `* **Câu hỏi phỏng vấn đề xuất:**\n`;
   if (report.interviewQuestions && report.interviewQuestions.length > 0) {
     report.interviewQuestions.forEach((q, idx) => {
-      md += `  ${idx + 1}. **Câu hỏi:** "${q.question}"\n`;
-      md += `     - *Kỳ vọng học sinh giải thích:* ${q.expectedAnswer}\n`;
-      md += `     - *Mục đích thẩm định:* ${q.purpose}\n`;
+      md += `  ${idx + 1}. **Câu hỏi:** "${ensureVietnamese(q.question)}"\n`;
+      md += `     - *Kỳ vọng học sinh giải thích:* ${ensureVietnamese(q.expectedAnswer)}\n`;
+      md += `     - *Mục đích thẩm định:* ${ensureVietnamese(q.purpose)}\n`;
     });
   } else {
     md += `  - Không cần phỏng vấn bổ sung do mã nguồn thể hiện rõ phong cách tự viết.\n`;

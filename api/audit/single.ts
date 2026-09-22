@@ -156,7 +156,11 @@ Tiêu chí:
 2. Phong cách chú thích kiểu sách giáo khoa, Doxygen, tiếng Anh chuẩn chỉ.
 3. Cấu trúc hoàn hảo bất thường, tối ưu I/O, try-catch.
 4. Cách đặt tên biến máy móc.
-Bối cảnh môn học: ${academicLevel}. Độ nhạy: ${sensitivity}.`;
+Bối cảnh môn học: ${academicLevel}. Độ nhạy: ${sensitivity}.
+
+QUY TẮC NGÔN NGỮ BẮT BUỘC:
+Toàn bộ nội dung trả về trong JSON (summary, reason, category, commentStyle, structureStyle, interviewQuestions bao gồm question, expectedAnswer, purpose) BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, chuẩn mực sư phạm.
+Tuyệt đối KHÔNG viết câu tiếng Anh (Ví dụ: KHÔNG viết "This is a boilerplate optimization...", KHÔNG viết "No comments present", KHÔNG viết "What is the purpose of...", KHÔNG viết "Beginner-friendly structure..."). Nếu không có chú thích, hãy ghi rõ bằng tiếng Việt: "Không có chú thích nào trong mã nguồn."`;
 
     const promptContent = `Học sinh: ${studentName || "Học sinh"}
 Mã nguồn C++:
@@ -164,7 +168,9 @@ Mã nguồn C++:
 ${code}
 \`\`\`
 Dấu hiệu tĩnh sơ bộ:
-${JSON.stringify(staticFindings, null, 2)}`;
+${JSON.stringify(staticFindings, null, 2)}
+
+NHẮC LẠI: Trả về kết quả 100% bằng TIẾNG VIỆT.`;
 
     let parsedResult: any = null;
     for (const model of CANDIDATE_MODELS) {

@@ -65,10 +65,15 @@ export default async function handler(req: any, res: any) {
     }));
 
     const systemPrompt = `Bạn là một chuyên gia đánh giá học thuật C++. Phân tích danh sách bài nộp và phát hiện dấu hiệu dùng AI hoặc trùng lặp cấu trúc giải thuật giữa các bài có CÙNG TÊN BÀI TẬP.
-Bối cảnh môn học: ${academicLevel}. Độ nhạy: ${sensitivity}.`;
+Bối cảnh môn học: ${academicLevel}. Độ nhạy: ${sensitivity}.
+
+QUY TẮC NGÔN NGỮ BẮT BUỘC:
+Toàn bộ nội dung trả về trong JSON (bao gồm lý do 'reason', danh mục 'category', 'commentStyle', câu hỏi 'question', câu trả lời kỳ vọng 'expectedAnswer', mục đích 'purpose', chi tiết so sánh 'details') BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT chuẩn mực sư phạm. Tuyệt đối KHÔNG viết câu tiếng Anh.`;
 
     const promptContent = `Danh sách bài nộp C++:
-${JSON.stringify(submissionsSummary, null, 2)}`;
+${JSON.stringify(submissionsSummary, null, 2)}
+
+NHẮC LẠI: Toàn bộ kết quả trả về bắt buộc viết 100% bằng TIẾNG VIỆT.`;
 
     let batchResult: any = null;
     for (const model of CANDIDATE_MODELS) {

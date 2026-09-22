@@ -219,6 +219,10 @@ TIÊU CHÍ ĐÁNH GIÁ (DẤU HIỆU DÙNG AI):
 Bối cảnh lớp học: Cấp độ môn học: ${academicLevel === "advanced" ? "Lập trình nâng cao / Cấu trúc dữ liệu nâng cao" : academicLevel === "dsa" ? "Cấu trúc dữ liệu & Giải thuật cơ sở" : "Nhập môn lập trình / C++ căn bản (CS101)"}.
 Mức độ nhạy kiểm tra: ${sensitivity}.
 
+QUY TẮC NGÔN NGỮ BẮT BUỘC:
+Toàn bộ nội dung trả về trong JSON (summary, reason, category, commentStyle, structureStyle, interviewQuestions bao gồm question, expectedAnswer, purpose) BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, chuẩn mực sư phạm.
+Tuyệt đối KHÔNG viết câu tiếng Anh (Ví dụ: KHÔNG viết "This is a boilerplate optimization...", KHÔNG viết "No comments present", KHÔNG viết "What is the purpose of...", KHÔNG viết "Beginner-friendly structure..."). Nếu không có chú thích, hãy ghi rõ bằng tiếng Việt: "Không có chú thích nào trong mã nguồn."
+
 HÃY TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON HỢP LỆ THEO CẤU TRÚC:
 - aiRiskLevel: "Thấp" | "Trung bình" | "Rất cao"
 - aiRiskScore: Số nguyên từ 0 đến 100 (ước tính phần trăm khả năng tạo bởi AI)
