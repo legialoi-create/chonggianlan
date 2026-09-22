@@ -1,0 +1,6 @@
+{
+  "name": "C++ Code Auditor - AI Detection & Academic Integrity",
+  "description": "Thẩm định mã nguồn C++, phát hiện dấu hiệu AI (ChatGPT, Claude, Copilot) và gian lận học thuật dành cho giáo viên và giảng viên.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
