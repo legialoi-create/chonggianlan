@@ -150,17 +150,22 @@ export default async function handler(req: any, res: any) {
       httpOptions: { headers: { "User-Agent": "aistudio-build" } },
     });
 
-    const systemPrompt = `Bạn là một chuyên gia đánh giá học thuật và thẩm định mã nguồn C++ giàu kinh nghiệm. Nhiệm vụ của bạn là phân tích mã nguồn C++ của học sinh nộp để phát hiện các dấu hiệu sử dụng AI (ChatGPT, Claude, GitHub Copilot, Gemini...) hoặc gian lận học thuật.
-Tiêu chí:
-1. Cú pháp vượt chuẩn C++17/20, ranges, lambda phức tạp.
-2. Phong cách chú thích kiểu sách giáo khoa, Doxygen, tiếng Anh chuẩn chỉ.
-3. Cấu trúc hoàn hảo bất thường, tối ưu I/O, try-catch.
-4. Cách đặt tên biến máy móc.
-Bối cảnh môn học: ${academicLevel}. Độ nhạy: ${sensitivity}.
+    const systemPrompt = `Bạn là một chuyên gia đánh giá học thuật và thẩm định mã nguồn C++ (Code Auditor) cấp cao. Nhiệm vụ của bạn là kiểm tra chuyên sâu, chi tiết từng dòng mã nguồn C++ để phát hiện dấu hiệu sử dụng AI (ChatGPT, Claude, GitHub Copilot, Gemini, DeepSeek...) hoặc gian lận học thuật.
+
+YÊU CẦU PHÂN TÍCH CHI TIẾT ĐA CHIỀU:
+1. Đánh giá 5 khía cạnh chấm điểm (0 - 100):
+   - syntaxScore: Điểm cú pháp vượt chuẩn (ranges, fold expression, auto binding, lambda phức tạp).
+   - boilerplateScore: Điểm khuôn mẫu AI (Fast I/O, return (0), template thi đấu).
+   - commentScore: Điểm phong cách chú thích (Doxygen, giải thích từng bước kiểu tiếng Anh).
+   - namingScore: Điểm quy ước đặt tên máy móc (camelCase, snake_case, LeetCode template).
+   - perfectionScore: Điểm độ hoàn hảo & xử lý biên (try-catch, ép kiểu, không có lỗi học sinh cơ bản).
+2. Dự đoán mô hình AI nghi vấn (suspectedAiModel): ví dụ "ChatGPT-4o (OpenAI)", "Claude 3.5 Sonnet (Anthropic)", "GitHub Copilot", hoặc "Không phát hiện (Học sinh tự viết)".
+3. Chỉ ra vị trí dòng (lineNumber) và mức độ nghiêm trọng (severity: "Nghi vấn cao" | "Nghi vấn trung bình" | "Dấu hiệu lưu ý") cho từng bằng chứng.
+4. Đưa ra 2-3 câu hỏi phỏng vấn và 1 câu hỏi bẫy thay đổi mã nguồn (trickQuestion) để giáo viên thử thách học sinh (thay đổi biến hoặc điều kiện dừng để xem học sinh có dự đoán được kết quả không).
+Bối cảnh môn học: ${academicLevel}. Mức độ nhạy: ${sensitivity}.
 
 QUY TẮC NGÔN NGỮ BẮT BUỘC:
-Toàn bộ nội dung trả về trong JSON (summary, reason, category, commentStyle, structureStyle, interviewQuestions bao gồm question, expectedAnswer, purpose) BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, chuẩn mực sư phạm.
-Tuyệt đối KHÔNG viết câu tiếng Anh (Ví dụ: KHÔNG viết "This is a boilerplate optimization...", KHÔNG viết "No comments present", KHÔNG viết "What is the purpose of...", KHÔNG viết "Beginner-friendly structure..."). Nếu không có chú thích, hãy ghi rõ bằng tiếng Việt: "Không có chú thích nào trong mã nguồn."`;
+Toàn bộ nội dung trả về trong JSON BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, chuẩn mực sư phạm. Tuyệt đối KHÔNG viết câu tiếng Anh.`;
 
     const promptContent = `Học sinh: ${studentName || "Học sinh"}
 Mã nguồn C++:
@@ -170,7 +175,7 @@ ${code}
 Dấu hiệu tĩnh sơ bộ:
 ${JSON.stringify(staticFindings, null, 2)}
 
-NHẮC LẠI: Trả về kết quả 100% bằng TIẾNG VIỆT.`;
+NHẮC LẠI: Trả về kết quả chi tiết sâu 100% bằng TIẾNG VIỆT.`;
 
     let parsedResult: any = null;
     for (const model of CANDIDATE_MODELS) {
@@ -186,15 +191,29 @@ NHẮC LẠI: Trả về kết quả 100% bằng TIẾNG VIỆT.`;
               properties: {
                 aiRiskLevel: { type: Type.STRING },
                 aiRiskScore: { type: Type.INTEGER },
+                suspectedAiModel: { type: Type.STRING },
+                scoreBreakdown: {
+                  type: Type.OBJECT,
+                  properties: {
+                    syntaxScore: { type: Type.INTEGER },
+                    boilerplateScore: { type: Type.INTEGER },
+                    commentScore: { type: Type.INTEGER },
+                    namingScore: { type: Type.INTEGER },
+                    perfectionScore: { type: Type.INTEGER },
+                  },
+                  required: ["syntaxScore", "boilerplateScore", "commentScore", "namingScore", "perfectionScore"],
+                },
                 summary: { type: Type.STRING },
                 evidence: {
                   type: Type.ARRAY,
                   items: {
                     type: Type.OBJECT,
                     properties: {
+                      lineNumber: { type: Type.STRING },
                       codeSnippet: { type: Type.STRING },
                       reason: { type: Type.STRING },
                       category: { type: Type.STRING },
+                      severity: { type: Type.STRING },
                     },
                     required: ["codeSnippet", "reason", "category"],
                   },
@@ -209,8 +228,17 @@ NHẮC LẠI: Trả về kết quả 100% bằng TIẾNG VIỆT.`;
                       question: { type: Type.STRING },
                       expectedAnswer: { type: Type.STRING },
                       purpose: { type: Type.STRING },
+                      type: { type: Type.STRING },
                     },
                     required: ["question", "expectedAnswer", "purpose"],
+                  },
+                },
+                trickQuestion: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question: { type: Type.STRING },
+                    expectedAnswer: { type: Type.STRING },
+                    purpose: { type: Type.STRING },
                   },
                 },
               },

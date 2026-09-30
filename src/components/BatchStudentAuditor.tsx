@@ -35,9 +35,12 @@ import { CrossComparisonMatrix } from "./CrossComparisonMatrix";
 import { formatBatchReportToMarkdown } from "../utils/reportFormatter";
 import { runClassMossAudit } from "../utils/mossEngine";
 import { performClientSideSingleAudit } from "../utils/clientAuditEngine";
+import { useAuth } from "../context/AuthContext";
 
 export const BatchStudentAuditor: React.FC = () => {
+  const { getIdToken, isAdmin } = useAuth();
   const [submissions, setSubmissions] = useState<SubmissionItem[]>([]);
+
   const [academicLevel, setAcademicLevel] = useState<AcademicLevel>("intro");
   const [sensitivity, setSensitivity] = useState<SensitivityLevel>("standard");
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -158,10 +161,24 @@ export const BatchStudentAuditor: React.FC = () => {
     setIsLoading(true);
     setError(null);
 
+    let token: string | null = null;
     try {
+      token = await getIdToken();
+    } catch (tokenErr) {
+      console.warn("Could not get Firebase ID token:", tokenErr);
+    }
+
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const res = await fetch("/api/audit/batch", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           submissions: submissions.map((s) => ({
             studentName: s.studentName,
@@ -181,6 +198,17 @@ export const BatchStudentAuditor: React.FC = () => {
       } catch {
         console.warn("Backend API returned non-JSON, switching to client-side rule evaluation.");
       }
+
+      if (res.status === 403) {
+        setError(data?.error || "Bạn không có quyền truy cập chức năng này. Chức năng thẩm định hàng loạt chỉ dành cho Quản trị viên (legialoi@gmail.com).");
+        return;
+      }
+
+      if (res.status === 401) {
+        setError(data?.error || "Yêu cầu đăng nhập tài khoản Google để thực hiện thao tác này.");
+        return;
+      }
+
 
       if (res.ok && data && Array.isArray(data.studentAudits)) {
         const builtReports: StudentAuditReport[] = data.studentAudits.map((audit: any) => {

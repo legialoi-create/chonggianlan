@@ -1,12 +1,91 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+// Read Firebase Applet Config
+let firebaseConfig: any = {};
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  }
+} catch (e) {
+  console.warn("Could not load firebase-applet-config.json:", e);
+}
+
+const ADMIN_EMAIL = "legialoi@gmail.com";
+
+interface AuthenticatedUser {
+  uid: string;
+  email: string;
+  email_verified: boolean;
+  displayName?: string;
+  photoURL?: string;
+  role: "admin" | "student";
+  isAdmin: boolean;
+}
+
+// Token Verification using Firebase Identity Toolkit REST API
+async function verifyFirebaseToken(authHeader?: string): Promise<AuthenticatedUser | null> {
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  const idToken = authHeader.split(" ")[1]?.trim();
+  if (!idToken) return null;
+
+  try {
+    const apiKey = firebaseConfig.apiKey || process.env.VITE_FIREBASE_API_KEY;
+    if (!apiKey) {
+      console.warn("Firebase apiKey is not available for backend verification");
+      return null;
+    }
+
+    const response = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idToken }),
+      }
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn("Token verification failed from Identity Toolkit:", errText);
+      return null;
+    }
+
+    const data = (await response.json()) as any;
+    if (data.users && data.users.length > 0) {
+      const user = data.users[0];
+      const email = (user.email || "").trim().toLowerCase();
+      const email_verified = Boolean(user.emailVerified);
+      const isAdmin = email === ADMIN_EMAIL.toLowerCase() && email_verified;
+
+      return {
+        uid: user.localId,
+        email,
+        email_verified,
+        displayName: user.displayName,
+        photoURL: user.photoUrl,
+        role: isAdmin ? "admin" : "student",
+        isAdmin,
+      };
+    }
+  } catch (err) {
+    console.error("Token verification error:", err);
+  }
+
+  return null;
+}
+
 // Initialize Gemini Client
+
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
@@ -76,49 +155,101 @@ async function generateContentWithRetry(params: {
 
 // Fallback generator using comprehensive heuristic static audit if Gemini is unavailable
 function generateHeuristicSingleAudit(studentName: string, code: string, staticFindings: any[]) {
-  const isHigh = staticFindings.length >= 2;
-  const isMed = staticFindings.length === 1;
+  const highCount = staticFindings.filter((f: any) => f.severity === "Nghi vấn cao" || f.category === "Cú pháp vượt chuẩn").length;
+  const isHigh = highCount >= 2;
+  const isMed = staticFindings.length >= 1 && !isHigh;
 
-  const score = isHigh ? 88 : isMed ? 62 : 15;
+  const score = isHigh ? 88 : isMed ? 64 : 16;
   const level = isHigh ? "Rất cao" : isMed ? "Trung bình" : "Thấp";
 
-  const evidence = staticFindings.map((f) => ({
-    codeSnippet: f.snippet,
-    reason: f.note,
-    category: f.category,
-  }));
+  let suspectedAiModel = "Không phát hiện (Học sinh tự viết)";
+  if (isHigh || isMed) {
+    const codeLower = code.toLowerCase();
+    if (codeLower.includes("ranges") || codeLower.includes("views")) {
+      suspectedAiModel = "Claude 3.5 Sonnet / C++20 Engine";
+    } else if (codeLower.includes("@param") || codeLower.includes("class solution")) {
+      suspectedAiModel = "ChatGPT (OpenAI) / LeetCode Prompt";
+    } else if (codeLower.includes("sync_with_stdio")) {
+      suspectedAiModel = "GitHub Copilot / ChatGPT Code";
+    } else {
+      suspectedAiModel = "Mô hình AI hỗ trợ lập trình (ChatGPT/Claude)";
+    }
+  }
+
+  const scoreBreakdown = {
+    syntaxScore: Math.min(100, staticFindings.filter((f: any) => f.category === "Cú pháp vượt chuẩn").length * 35 || (isHigh ? 75 : isMed ? 40 : 15)),
+    boilerplateScore: Math.min(100, staticFindings.filter((f: any) => f.category === "Cấu trúc hoàn hảo bất thường").length * 30 || (isHigh ? 80 : isMed ? 50 : 20)),
+    commentScore: Math.min(100, staticFindings.filter((f: any) => f.category === "Phong cách chú thích").length * 40 || (isHigh ? 70 : isMed ? 30 : 10)),
+    namingScore: Math.min(100, isHigh ? 65 : isMed ? 35 : 15),
+    perfectionScore: Math.min(100, isHigh ? 85 : isMed ? 60 : 20),
+  };
+
+  const lines = code.split("\n");
+  const evidence = staticFindings.map((f, idx) => {
+    let lineNum = "Dòng trong bài";
+    const snippetFirst = f.snippet.split("\n")[0].trim();
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes(snippetFirst) || (snippetFirst.length > 8 && lines[i].includes(snippetFirst.slice(0, 10)))) {
+        lineNum = `Dòng ${i + 1}`;
+        break;
+      }
+    }
+    return {
+      lineNumber: lineNum,
+      codeSnippet: f.snippet,
+      reason: f.note,
+      category: f.category,
+      severity: f.severity || (f.category === "Cú pháp vượt chuẩn" ? "Nghi vấn cao" : "Nghi vấn trung bình"),
+    };
+  });
 
   if (evidence.length === 0) {
     evidence.push({
-      codeSnippet: code.split("\n").slice(0, 5).join("\n"),
+      lineNumber: "Dòng 1 - 5",
+      codeSnippet: lines.slice(0, 4).join("\n"),
       reason: "Mã nguồn sử dụng cú pháp tự nhiên, không có các thư viện C++17/20 bất thường hay comment sách giáo khoa.",
       category: "Cấu trúc thông thường",
+      severity: "Dấu hiệu lưu ý",
     });
   }
 
   return {
     aiRiskLevel: level,
     aiRiskScore: score,
-    summary: `Thẩm định dựa trên bộ luật phân tích tĩnh: ${staticFindings.length} dấu hiệu bất thường về cú pháp / chú thích được phát hiện.`,
+    suspectedAiModel,
+    scoreBreakdown,
+    summary: `Thẩm định chi tiết đa chiều: ${
+      staticFindings.length > 0
+        ? `Phát hiện ${staticFindings.length} dấu hiệu đáng ngờ bao gồm cú pháp vượt chuẩn, khuôn mẫu AI và phong cách chú thích.`
+        : "Mã nguồn có cấu trúc tự nhiên, không có dấu hiệu sử dụng AI rõ rệt."
+    }`,
     evidence,
     commentStyle: staticFindings.some((f) => f.category === "Phong cách chú thích")
       ? "Chú thích có đặc điểm chuẩn mực của AI (tiếng Anh hoặc định dạng Doxygen)."
-      : "Không phát hiện dấu hiệu comment máy móc, phong cách tự nhiên.",
+      : "Không có chú thích hoặc chú thích tự nhiên của người học.",
     structureStyle: staticFindings.some((f) => f.category === "Cấu trúc hoàn hảo bất thường")
       ? "Có mẫu tối ưu hóa I/O hoặc bắt ngoại lệ mẫu mực thường thấy ở code AI."
       : "Bố cục và tên biến tự nhiên của người học.",
     interviewQuestions: [
       {
+        type: "Khảo sát giải thuật",
         question: "Em hãy giải thích ý nghĩa và luồng thực thi của hàm/vòng lặp chính trong bài làm này?",
         expectedAnswer: "Học sinh tự viết phải trình bày được mục đích từng biến và thuật toán xử lý.",
         purpose: "Kiểm tra mức độ hiểu sâu mã nguồn của học sinh.",
       },
       {
+        type: "Chất vấn cú pháp",
         question: "Nếu kích thước dữ liệu đầu vào n tăng lên 10^6, đoạn code này có gặp vấn đề gì không và em sẽ tối ưu ra sao?",
         expectedAnswer: "Nêu được độ phức tạp thời gian O(...) và không gian bộ nhớ của thuật toán.",
         purpose: "Thẩm định năng lực tư duy thuật toán độc lập.",
       },
     ],
+    trickQuestion: {
+      type: "Bẫy thay đổi mã nguồn",
+      question: "Nếu thầy/cô đổi điều kiện lặp hoặc thay đổi biến khởi tạo của thuật toán thì chương trình xuất ra kết quả gì?",
+      expectedAnswer: "Học sinh tự làm bài sẽ lập tức dự đoán được kết quả sai lệch hoặc vòng lặp vô tận. Học sinh chép AI sẽ lúng túng vì không hiểu luồng chạy thực tế.",
+      purpose: "Bẫy kiểm tra phản xạ trực tiếp: phân định tuyệt đối giữa học sinh tự viết và người chép code từ AI.",
+    },
   };
 }
 
@@ -197,10 +328,34 @@ async function startServer() {
     return findings;
   }
 
-  // Single Student Audit Endpoint
+  // User Auth Profile Verification Endpoint
+  app.get("/api/auth/me", async (req, res) => {
+    try {
+      const user = await verifyFirebaseToken(req.headers.authorization);
+      if (!user) {
+        return res.status(401).json({ authenticated: false, error: "Chưa đăng nhập" });
+      }
+      return res.json({
+        authenticated: true,
+        user,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: "Lỗi xác thực: " + (err.message || err.toString()) });
+    }
+  });
+
+  // Single Student Audit Endpoint (Học sinh & Quản trị viên)
   app.post("/api/audit/single", async (req, res) => {
     try {
+      const authUser = await verifyFirebaseToken(req.headers.authorization);
+      if (!authUser) {
+        return res.status(401).json({
+          error: "Yêu cầu đăng nhập tài khoản Google để thực hiện thẩm định mã nguồn.",
+        });
+      }
+
       const { studentName, code, academicLevel = "intro", sensitivity = "standard" } = req.body;
+
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
         return res.status(400).json({ error: "Vui lòng cung cấp mã nguồn C++ cần phân tích." });
@@ -208,32 +363,35 @@ async function startServer() {
 
       const staticFindings = performStaticHeuristics(code);
 
-      const systemPrompt = `Bạn là một chuyên gia đánh giá học thuật và thẩm định mã nguồn C++ (Code Auditor) giàu kinh nghiệm. Nhiệm vụ của bạn là phân tích mã nguồn C++ của học sinh nộp để phát hiện các dấu hiệu sử dụng AI (ChatGPT, Claude, GitHub Copilot, Gemini...) hoặc gian lận học thuật.
+      const systemPrompt = `Bạn là một chuyên gia đánh giá học thuật và thẩm định mã nguồn C++ (Code Auditor) cấp cao. Nhiệm vụ của bạn là kiểm tra chuyên sâu, chi tiết từng dòng mã nguồn C++ để phát hiện dấu hiệu sử dụng AI (ChatGPT, Claude, GitHub Copilot, Gemini, DeepSeek...) hoặc gian lận học thuật.
 
-TIÊU CHÍ ĐÁNH GIÁ (DẤU HIỆU DÙNG AI):
-1. Cú pháp vượt chuẩn kiến thức thông thường: C++17, C++20, template metaprogramming, lambda functions phức tạp, hoặc các hàm thư viện chuẩn ít phổ biến trong chương trình học phổ thông/nhập môn (std::string_view, std::ranges, cấu trúc lambda trong STL, custom allocator,...).
-2. Phong cách chú thích (Comments): Chú thích theo lối giải thích từng dòng kiểu sách giáo khoa, ngữ khí trịnh trọng bằng tiếng Anh hoàn hảo, cấu trúc docstring Doxygen chuẩn chỉ (@param, @return, @brief) mà học sinh thường không tự viết.
-3. Cấu trúc hoàn hảo bất thường: Xử lý ngoại lệ (try-catch), kiểm tra điều kiện biên cực kỳ chặt chẽ, tối ưu hóa I/O (ios_base::sync_with_stdio(false); cin.tie(NULL);) đi kèm giải thích mẫu mực, không hề có bug cơ bản.
-4. Cách đặt tên và bố cục: Quy ước đặt tên (CamelCase/snake_case) nhất quán đến mức máy móc, không có vết tích thử-sai (trial and error) hay thói quen viết tắt điển hình của học sinh (như i, j, tmp, ans, res, dem,...).
-
+YÊU CẦU PHÂN TÍCH CHI TIẾT ĐA CHIỀU:
+1. Đánh giá 5 khía cạnh chấm điểm (0 - 100):
+   - syntaxScore: Điểm cú pháp vượt chuẩn (ranges, fold expression, auto binding, lambda phức tạp).
+   - boilerplateScore: Điểm khuôn mẫu AI (Fast I/O, return (0), template thi đấu).
+   - commentScore: Điểm phong cách chú thích (Doxygen, giải thích từng bước kiểu tiếng Anh).
+   - namingScore: Điểm quy ước đặt tên máy móc (camelCase, snake_case, LeetCode template).
+   - perfectionScore: Điểm độ hoàn hảo & xử lý biên (try-catch, ép kiểu, không có lỗi học sinh cơ bản).
+2. Dự đoán mô hình AI nghi vấn (suspectedAiModel): ví dụ "ChatGPT-4o (OpenAI)", "Claude 3.5 Sonnet (Anthropic)", "GitHub Copilot", hoặc "Không phát hiện (Học sinh tự viết)".
+3. Chỉ ra vị trí dòng (lineNumber) và mức độ nghiêm trọng (severity: "Nghi vấn cao" | "Nghi vấn trung bình" | "Dấu hiệu lưu ý") cho từng bằng chứng.
+4. Đưa ra 2-3 câu hỏi phỏng vấn và 1 câu hỏi bẫy thay đổi mã nguồn (trickQuestion) để giáo viên thử thách học sinh (thay đổi biến hoặc điều kiện dừng để xem học sinh có dự đoán được kết quả không).
 Bối cảnh lớp học: Cấp độ môn học: ${academicLevel === "advanced" ? "Lập trình nâng cao / Cấu trúc dữ liệu nâng cao" : academicLevel === "dsa" ? "Cấu trúc dữ liệu & Giải thuật cơ sở" : "Nhập môn lập trình / C++ căn bản (CS101)"}.
 Mức độ nhạy kiểm tra: ${sensitivity}.
 
 QUY TẮC NGÔN NGỮ BẮT BUỘC:
-Toàn bộ nội dung trả về trong JSON (summary, reason, category, commentStyle, structureStyle, interviewQuestions bao gồm question, expectedAnswer, purpose) BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, chuẩn mực sư phạm.
-Tuyệt đối KHÔNG viết câu tiếng Anh (Ví dụ: KHÔNG viết "This is a boilerplate optimization...", KHÔNG viết "No comments present", KHÔNG viết "What is the purpose of...", KHÔNG viết "Beginner-friendly structure..."). Nếu không có chú thích, hãy ghi rõ bằng tiếng Việt: "Không có chú thích nào trong mã nguồn."
+Toàn bộ nội dung trả về trong JSON BẮT BUỘC PHẢI VIẾT 100% HOÀN TOÀN BẰNG TIẾNG VIỆT tự nhiên, chuẩn mực sư phạm. Tuyệt đối KHÔNG viết câu tiếng Anh.
 
 HÃY TRẢ VỀ KẾT QUẢ DƯỚI DẠNG JSON HỢP LỆ THEO CẤU TRÚC:
 - aiRiskLevel: "Thấp" | "Trung bình" | "Rất cao"
-- aiRiskScore: Số nguyên từ 0 đến 100 (ước tính phần trăm khả năng tạo bởi AI)
+- aiRiskScore: Số nguyên từ 0 đến 100
+- suspectedAiModel: Tên mô hình AI nghi vấn
+- scoreBreakdown: { syntaxScore, boilerplateScore, commentScore, namingScore, perfectionScore }
 - summary: Nhận xét tóm tắt tổng quan về mã nguồn này
-- evidence: Mảng các bằng chứng cụ thể, mỗi phần tử gồm:
-    + codeSnippet: đoạn code đáng ngờ
-    + reason: giải thích vì sao đoạn này mang đặc trưng của AI thay vì học sinh tự viết
-    + category: "Cú pháp vượt chuẩn" | "Phong cách chú thích" | "Cấu trúc hoàn hảo bất thường" | "Cách đặt tên và bố cục"
-- commentStyle: Nhận xét chi tiết về phong cách chú thích (comment) của bài làm
+- evidence: Mảng các bằng chứng cụ thể gồm { lineNumber, codeSnippet, reason, category, severity }
+- commentStyle: Nhận xét chi tiết về phong cách chú thích của bài làm
 - structureStyle: Nhận xét về cấu trúc, cách đặt tên, xử lý biên và tính nhất quán
-- interviewQuestions: Mảng gồm 2 đến 3 câu hỏi kỹ thuật xoáy trực tiếp vào đoạn code nghi vấn để giáo viên có thể gọi học sinh lên vấn đáp (mỗi câu gồm question: câu hỏi giáo viên đọc, expectedAnswer: gợi ý câu trả lời chuẩn mà học sinh tự viết phải nắm được, purpose: mục đích thẩm định).`;
+- interviewQuestions: Mảng gồm 2 đến 3 câu hỏi kỹ thuật { question, expectedAnswer, purpose, type }
+- trickQuestion: 1 câu hỏi bẫy thay đổi code { question, expectedAnswer, purpose }`;
 
       const promptContent = `Học sinh: ${studentName || "Chưa rõ danh tính"}
 
@@ -262,6 +420,21 @@ ${JSON.stringify(staticFindings, null, 2)}
                 type: Type.INTEGER,
                 description: "Tỷ lệ % ước tính nghi vấn AI từ 0 đến 100",
               },
+              suspectedAiModel: {
+                type: Type.STRING,
+                description: "Mô hình AI nghi vấn",
+              },
+              scoreBreakdown: {
+                type: Type.OBJECT,
+                properties: {
+                  syntaxScore: { type: Type.INTEGER },
+                  boilerplateScore: { type: Type.INTEGER },
+                  commentScore: { type: Type.INTEGER },
+                  namingScore: { type: Type.INTEGER },
+                  perfectionScore: { type: Type.INTEGER },
+                },
+                required: ["syntaxScore", "boilerplateScore", "commentScore", "namingScore", "perfectionScore"],
+              },
               summary: {
                 type: Type.STRING,
                 description: "Đánh giá tóm tắt bài nộp",
@@ -271,9 +444,11 @@ ${JSON.stringify(staticFindings, null, 2)}
                 items: {
                   type: Type.OBJECT,
                   properties: {
+                    lineNumber: { type: Type.STRING },
                     codeSnippet: { type: Type.STRING },
                     reason: { type: Type.STRING },
                     category: { type: Type.STRING },
+                    severity: { type: Type.STRING },
                   },
                   required: ["codeSnippet", "reason", "category"],
                 },
@@ -294,8 +469,17 @@ ${JSON.stringify(staticFindings, null, 2)}
                     question: { type: Type.STRING },
                     expectedAnswer: { type: Type.STRING },
                     purpose: { type: Type.STRING },
+                    type: { type: Type.STRING },
                   },
                   required: ["question", "expectedAnswer", "purpose"],
+                },
+              },
+              trickQuestion: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  expectedAnswer: { type: Type.STRING },
+                  purpose: { type: Type.STRING },
                 },
               },
             },
@@ -329,10 +513,24 @@ ${JSON.stringify(staticFindings, null, 2)}
     }
   });
 
-  // Batch Multi-student & Cross-Audit Endpoint
+  // Batch Multi-student & Cross-Audit Endpoint (Quản trị viên legialoi@gmail.com duy nhất)
   app.post("/api/audit/batch", async (req, res) => {
     try {
+      const authUser = await verifyFirebaseToken(req.headers.authorization);
+      if (!authUser) {
+        return res.status(401).json({
+          error: "Yêu cầu đăng nhập tài khoản Google để thực hiện thao tác này.",
+        });
+      }
+
+      if (!authUser.isAdmin) {
+        return res.status(403).json({
+          error: "Bạn không có quyền truy cập chức năng này. Chức năng thẩm định hàng loạt chỉ dành cho Quản trị viên (legialoi@gmail.com).",
+        });
+      }
+
       const { submissions, academicLevel = "intro", sensitivity = "standard" } = req.body;
+
 
       if (!submissions || !Array.isArray(submissions) || submissions.length === 0) {
         return res.status(400).json({ error: "Danh sách bài nộp trống." });

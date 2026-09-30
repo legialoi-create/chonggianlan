@@ -5,16 +5,31 @@ export function formatSingleReportToMarkdown(report: StudentAuditReport): string
   let md = `#### [${report.studentName}${report.fileName ? ` / ${report.fileName}` : ""}]\n`;
   md += `* **Đánh giá mức độ nghi vấn AI:** ${report.aiRiskLevel} (${report.aiRiskScore}% ước tính)\n`;
 
+  if (report.suspectedAiModel) {
+    md += `* **Mô hình AI nghi vấn:** ${report.suspectedAiModel}\n`;
+  }
+
+  if (report.scoreBreakdown) {
+    md += `* **Điểm phân tích đa chiều (0 - 100):**\n`;
+    md += `  - Cú pháp vượt chuẩn (C++17/20, ranges, lambda): **${report.scoreBreakdown.syntaxScore}%**\n`;
+    md += `  - Khuôn mẫu AI & Fast I/O: **${report.scoreBreakdown.boilerplateScore}%**\n`;
+    md += `  - Phong cách chú thích máy móc: **${report.scoreBreakdown.commentScore}%**\n`;
+    md += `  - Quy ước đặt tên máy móc: **${report.scoreBreakdown.namingScore}%**\n`;
+    md += `  - Độ hoàn hảo & Xử lý biên: **${report.scoreBreakdown.perfectionScore}%**\n`;
+  }
+
   if (report.summary) {
     md += `* **Tóm tắt kiểm định:** ${ensureVietnamese(report.summary)}\n`;
   }
 
   md += `* **Bằng chứng cụ thể:**\n`;
   if (report.evidence && report.evidence.length > 0) {
-    report.evidence.forEach((item) => {
-      md += `  - Dòng code / đoạn thuật toán đáng ngờ: \`${item.codeSnippet.replace(/\n/g, " ")}\`\n`;
-      md += `    + Phân loại: ${ensureVietnamese(item.category)}\n`;
-      md += `    + Lý do nghi vấn: ${ensureVietnamese(item.reason)}\n`;
+    report.evidence.forEach((item, idx) => {
+      const lineInfo = item.lineNumber ? `[${item.lineNumber}] ` : "";
+      const severityInfo = item.severity ? `(${item.severity}) ` : "";
+      md += `  ${idx + 1}. ${lineInfo}${severityInfo}\`${item.codeSnippet.replace(/\n/g, " ")}\`\n`;
+      md += `     + Phân loại: ${ensureVietnamese(item.category)}\n`;
+      md += `     + Lý do nghi vấn: ${ensureVietnamese(item.reason)}\n`;
     });
   } else {
     md += `  - Không phát hiện đoạn code đáng ngờ mang dấu hiệu đặc trưng của AI.\n`;
@@ -37,6 +52,13 @@ export function formatSingleReportToMarkdown(report: StudentAuditReport): string
     md += `  - Không cần phỏng vấn bổ sung do mã nguồn thể hiện rõ phong cách tự viết.\n`;
   }
 
+  if (report.trickQuestion) {
+    md += `* **Bẫy thay đổi mã nguồn khi vấn đáp:**\n`;
+    md += `  - **Câu hỏi thử thách:** "${ensureVietnamese(report.trickQuestion.question)}"\n`;
+    md += `  - **Kỳ vọng phản xạ:** ${ensureVietnamese(report.trickQuestion.expectedAnswer)}\n`;
+    md += `  - **Mục đích:** ${ensureVietnamese(report.trickQuestion.purpose)}\n`;
+  }
+
   return md;
 }
 
@@ -44,7 +66,7 @@ export function formatBatchReportToMarkdown(
   reports: StudentAuditReport[],
   crossComparisons?: CrossComparison[]
 ): string {
-  let md = `# BÁO CÁO THẨM ĐỊNH MÃ NGUỒN C++ & PHÁT HIỆN AI\n`;
+  let md = `# BÁO CÁO THẨM ĐỊNH MÃ NGUỒN C++ & PHÁT HIỆN AI CHI TIẾT\n`;
   md += `*Thời gian thẩm định: ${new Date().toLocaleString("vi-VN")}*\n`;
   md += `*Tổng số bài nộp đã kiểm tra: ${reports.length} bài*\n\n`;
 
