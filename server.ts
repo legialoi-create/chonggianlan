@@ -1,91 +1,12 @@
 import express from "express";
 import path from "path";
-import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Read Firebase Applet Config
-let firebaseConfig: any = {};
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
-  }
-} catch (e) {
-  console.warn("Could not load firebase-applet-config.json:", e);
-}
-
-const ADMIN_EMAIL = "legialoi@gmail.com";
-
-interface AuthenticatedUser {
-  uid: string;
-  email: string;
-  email_verified: boolean;
-  displayName?: string;
-  photoURL?: string;
-  role: "admin" | "student";
-  isAdmin: boolean;
-}
-
-// Token Verification using Firebase Identity Toolkit REST API
-async function verifyFirebaseToken(authHeader?: string): Promise<AuthenticatedUser | null> {
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const idToken = authHeader.split(" ")[1]?.trim();
-  if (!idToken) return null;
-
-  try {
-    const apiKey = firebaseConfig.apiKey || process.env.VITE_FIREBASE_API_KEY;
-    if (!apiKey) {
-      console.warn("Firebase apiKey is not available for backend verification");
-      return null;
-    }
-
-    const response = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken }),
-      }
-    );
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.warn("Token verification failed from Identity Toolkit:", errText);
-      return null;
-    }
-
-    const data = (await response.json()) as any;
-    if (data.users && data.users.length > 0) {
-      const user = data.users[0];
-      const email = (user.email || "").trim().toLowerCase();
-      const email_verified = Boolean(user.emailVerified);
-      const isAdmin = email === ADMIN_EMAIL.toLowerCase() && email_verified;
-
-      return {
-        uid: user.localId,
-        email,
-        email_verified,
-        displayName: user.displayName,
-        photoURL: user.photoUrl,
-        role: isAdmin ? "admin" : "student",
-        isAdmin,
-      };
-    }
-  } catch (err) {
-    console.error("Token verification error:", err);
-  }
-
-  return null;
-}
-
 // Initialize Gemini Client
-
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
@@ -328,34 +249,10 @@ async function startServer() {
     return findings;
   }
 
-  // User Auth Profile Verification Endpoint
-  app.get("/api/auth/me", async (req, res) => {
-    try {
-      const user = await verifyFirebaseToken(req.headers.authorization);
-      if (!user) {
-        return res.status(401).json({ authenticated: false, error: "Chưa đăng nhập" });
-      }
-      return res.json({
-        authenticated: true,
-        user,
-      });
-    } catch (err: any) {
-      return res.status(500).json({ error: "Lỗi xác thực: " + (err.message || err.toString()) });
-    }
-  });
-
-  // Single Student Audit Endpoint (Học sinh & Quản trị viên)
+  // Single Student Audit Endpoint
   app.post("/api/audit/single", async (req, res) => {
     try {
-      const authUser = await verifyFirebaseToken(req.headers.authorization);
-      if (!authUser) {
-        return res.status(401).json({
-          error: "Yêu cầu đăng nhập tài khoản Google để thực hiện thẩm định mã nguồn.",
-        });
-      }
-
       const { studentName, code, academicLevel = "intro", sensitivity = "standard" } = req.body;
-
 
       if (!code || typeof code !== "string" || code.trim().length === 0) {
         return res.status(400).json({ error: "Vui lòng cung cấp mã nguồn C++ cần phân tích." });
@@ -513,24 +410,10 @@ ${JSON.stringify(staticFindings, null, 2)}
     }
   });
 
-  // Batch Multi-student & Cross-Audit Endpoint (Quản trị viên legialoi@gmail.com duy nhất)
+  // Batch Multi-student & Cross-Audit Endpoint
   app.post("/api/audit/batch", async (req, res) => {
     try {
-      const authUser = await verifyFirebaseToken(req.headers.authorization);
-      if (!authUser) {
-        return res.status(401).json({
-          error: "Yêu cầu đăng nhập tài khoản Google để thực hiện thao tác này.",
-        });
-      }
-
-      if (!authUser.isAdmin) {
-        return res.status(403).json({
-          error: "Bạn không có quyền truy cập chức năng này. Chức năng thẩm định hàng loạt chỉ dành cho Quản trị viên (legialoi@gmail.com).",
-        });
-      }
-
       const { submissions, academicLevel = "intro", sensitivity = "standard" } = req.body;
-
 
       if (!submissions || !Array.isArray(submissions) || submissions.length === 0) {
         return res.status(400).json({ error: "Danh sách bài nộp trống." });
